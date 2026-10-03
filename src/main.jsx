@@ -84,7 +84,7 @@ function App() {
   const [users, setUsers] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
   const [photos, setPhotos] = useState([]);
-        content = <Team users={users} jobs={jobs} onAdd={() => setModal({ type: 'user' })} onMessage={(email) => { setChatPeer(email); setPage('Messages'); }} />;
+  const [contacts, setContacts] = useState([]);
   const [modal, setModal] = useState(null);
   const [chatPeer, setChatPeer] = useState('');
   const [chatJob, setChatJob] = useState('');
@@ -215,7 +215,7 @@ function Overview({ user, jobs, timeEntries, photos, contacts, todayJobs, onNavi
   const inProgress = jobs.filter((job) => job.status === 'In Progress').length;
   const hours = timeEntries.reduce((sum, entry) => sum + (entry.hours || 0), 0);
   return <>
-    <PageHeading eyebrow={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()} title={`Good morning, ${user.name.split(' ')[0]}.`} detail="Here’s the shape of your team’s day." action={<button className="button button-dark" onClick={onNewJob}><Plus size={16} /> Schedule a job</button>} />
+    <PageHeading eyebrow={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()} title={`Good morning, ${user.name.split(' ')[0]}.`} detail="Here’s the shape of your team’s day." action={<div className="page-heading-actions"><button className="button button-dark" onClick={onNewJob}><Plus size={16} /> Schedule a job</button><button className="button button-dark" onClick={onMessage}><MessageCircle size={16} /> Send message</button></div>} />
     <section className="metric-grid">
       <Metric label="Today’s jobs" value={todayJobs.length.toString().padStart(2, '0')} foot={`${jobs.filter((job) => job.status === 'Pending').length} awaiting start`} icon={CalendarDays} tone="mint" />
       <Metric label="On the clock" value={inProgress.toString().padStart(2, '0')} foot={inProgress ? 'Active right now' : 'No active shifts'} icon={Clock3} tone="peach" />

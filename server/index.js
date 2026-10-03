@@ -254,10 +254,15 @@ io.on('connection', (socket) => {
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 const clientDir = path.resolve(root, '../dist');
+const clientIndex = path.join(clientDir, 'index.html');
+app.get('/', (_req, res, next) => {
+  res.sendFile(clientIndex, (error) => {
+    if (error) next(error);
+  });
+});
 app.use(express.static(clientDir));
 app.use((req, res, next) => {
   if (req.method !== 'GET' || req.path === '/api' || req.path.startsWith('/api/')) return next();
-  const clientIndex = path.join(clientDir, 'index.html');
   if (fs.existsSync(clientIndex)) return res.sendFile(clientIndex);
   next();
 });

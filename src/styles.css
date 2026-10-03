@@ -21,6 +21,7 @@ button, input, select, textarea { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #8eb89a; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .55; }
+.page-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .loading-screen { min-height: 100vh; display: grid; place-items: center; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--forest); font: 800 19px var(--serif); }
 .brand-light { color: #f2f4ed; }
