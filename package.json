@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"npm:server:dev\" \"npm:client:dev\"",
-    "server:dev": "node --watch server/index.js",
+    "server:dev": "node --env-file-if-exists=.env --watch server/index.js",
     "client:dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "start": "node server/index.js"
+    "start": "node --env-file-if-exists=.env server/index.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

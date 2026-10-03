@@ -9,7 +9,9 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL printed by the dev server (usually `http://localhost:5173`). The API listens on port `3001`.
+Open the Vite URL printed by the dev server (usually `http://localhost:5173`). The API listens on port `3000`.
+
+The root `.env` configures the API port and SQLite database path. Copy `.env.example` to `.env` to create local settings; the Vite proxy reads the same `PORT` value.
 
 Demo accounts use the password `welcome123`:
 

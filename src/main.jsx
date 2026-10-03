@@ -20,7 +20,7 @@ const formatTime = (time) => time ? new Date(time).toLocaleTimeString('en-US', {
 const initials = (name = '') => name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
 function Login({ onLogin }) {
-  const [email, setEmail] = useState('your@email.com');
+  const [email, setEmail] = useState('cleaner@email.com');
   const [password, setPassword] = useState('welcome123');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

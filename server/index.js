@@ -16,7 +16,11 @@ const uploadDir = path.join(root, 'uploads');
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadDir, { recursive: true });
 
-const db = new Database(path.join(dataDir, 'timecard.sqlite'));
+const databaseUrl = process.env.DATABASE_URL || 'file:./data/timecard.sqlite';
+if (!databaseUrl.startsWith('file:')) throw new Error('DATABASE_URL must be a file: URL for the SQLite adapter.');
+const databasePath = path.resolve(root, databaseUrl.slice('file:'.length));
+fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+const db = new Database(databasePath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.exec(`
@@ -258,5 +262,5 @@ app.use((req, res, next) => {
   next();
 });
 
-const port = Number(process.env.PORT || 3001);
+const port = Number(process.env.PORT || 3000);
 httpServer.listen(port, '0.0.0.0', () => console.log(`TimeCard API listening on http://localhost:${port}`));
