@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import {
   ArrowDownLeft, ArrowRight, CalendarDays, Camera, Check, CheckCheck, ChevronDown,
   Clock3, FileClock, House, LogOut, MapPin, Menu, MessageCircle, Paperclip,
-  Pencil, Plus, Send, ShieldCheck, Sparkles, Users, X,
+  Pencil, Plus, Send, ShieldCheck, Sparkles, Trash2, Users, X,
 } from 'lucide-react';
 import './styles.css';
 
@@ -20,6 +20,8 @@ const formatTime = (time) => time ? new Date(time).toLocaleTimeString('en-US', {
 const initials = (name = '') => name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
 function Login({ onLogin }) {
+  const [mode, setMode] = useState('login');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('cleaner@email.com');
   const [password, setPassword] = useState('welcome123');
   const [error, setError] = useState('');
@@ -30,7 +32,15 @@ function Login({ onLogin }) {
     setBusy(true);
     setError('');
     try {
-      const result = await api('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const endpoint = mode === 'signup' ? '/api/signup' : '/api/auth/login';
+      const payload = mode === 'signup'
+        ? { name, email, password }
+        : { email, password };
+      const result = await api(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       onLogin(result.user);
     } catch (err) {
       setError(err.message);
@@ -54,21 +64,30 @@ function Login({ onLogin }) {
       <section className="login-panel">
         <div className="login-card">
           <div className="mobile-brand brand"><span className="brand-mark"><Clock3 size={17} /></span><span>timecard</span></div>
-          <span className="eyebrow">WELCOME BACK</span>
-          <h2>Sign in to your workspace</h2>
-          <p className="muted">Your team’s day, all in good order.</p>
-          <form onSubmit={submit} className="login-form">
-            <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></label>
-            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>
-            {error && <p className="form-error">{error}</p>}
-            <button className="button button-dark button-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}<ArrowRight size={16} /></button>
-          </form>
-          <div className="demo-access">
-            <span className="eyebrow">DEMO ACCESS</span>
-            <button type="button" className="demo-choice" onClick={() => { setEmail('your@email.com'); setPassword('welcome123'); }}><span className="demo-icon"><ShieldCheck size={16} /></span><span><strong>Manager</strong><small>your@email.com</small></span><ArrowRight size={15} /></button>
-            <button type="button" className="demo-choice" onClick={() => { setEmail('cleaner@email.com'); setPassword('welcome123'); }}><span className="demo-icon demo-icon-green"><Sparkles size={16} /></span><span><strong>Cleaner</strong><small>cleaner@email.com</small></span><ArrowRight size={15} /></button>
-            <small className="demo-password">Both accounts use <b>welcome123</b></small>
+          <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
+            <button type="button" className={mode === 'login' ? 'auth-toggle-button active' : 'auth-toggle-button'} onClick={() => setMode('login')}>Sign in</button>
+            <button type="button" className={mode === 'signup' ? 'auth-toggle-button active' : 'auth-toggle-button'} onClick={() => setMode('signup')}>Create account</button>
           </div>
+          <span className="eyebrow">{mode === 'signup' ? 'JOIN THE TEAM' : 'WELCOME BACK'}</span>
+          <h2>{mode === 'signup' ? 'Create your account' : 'Sign in to your workspace'}</h2>
+          <p className="muted">{mode === 'signup' ? 'Set up your profile and get assigned work right away.' : 'Your team’s day, all in good order.'}</p>
+          <form onSubmit={submit} className="login-form">
+            {mode === 'signup' && (
+              <label>Full name<input type="text" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="Jordan Smith" required /></label>
+            )}
+            <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={mode === 'signup' ? 'email' : 'username'} required /></label>
+            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength="6" required /></label>
+            {error && <p className="form-error">{error}</p>}
+            <button className="button button-dark button-full" disabled={busy}>{busy ? (mode === 'signup' ? 'Creating account…' : 'Signing in…') : (mode === 'signup' ? 'Create account' : 'Sign in')}<ArrowRight size={16} /></button>
+          </form>
+          {mode === 'login' && (
+            <div className="demo-access">
+              <span className="eyebrow">DEMO ACCESS</span>
+              <button type="button" className="demo-choice" onClick={() => { setEmail('your@email.com'); setPassword('welcome123'); }}><span className="demo-icon"><ShieldCheck size={16} /></span><span><strong>Manager</strong><small>your@email.com</small></span><ArrowRight size={15} /></button>
+              <button type="button" className="demo-choice" onClick={() => { setEmail('cleaner@email.com'); setPassword('welcome123'); }}><span className="demo-icon demo-icon-green"><Sparkles size={16} /></span><span><strong>Cleaner</strong><small>cleaner@email.com</small></span><ArrowRight size={15} /></button>
+              <small className="demo-password">Both accounts use <b>welcome123</b></small>
+            </div>
+          )}
         </div>
         <span className="login-copyright">© 2026 TIMECARD STUDIO</span>
       </section>
@@ -145,6 +164,28 @@ function App() {
     }
   }
 
+  async function deleteJob(job) {
+    if (!window.confirm(`Delete ${job.id}? Jobs with linked time entries, photos, or messages cannot be deleted.`)) return;
+    try {
+      await api(`/api/jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' });
+      await refresh();
+      setNotice('Job deleted.');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteUser(person) {
+    if (!window.confirm(`Delete ${person.name}? Team members with jobs, time entries, photos, or messages cannot be deleted.`)) return;
+    try {
+      await api(`/api/users/${encodeURIComponent(person.email)}`, { method: 'DELETE' });
+      await refresh();
+      setNotice('Team member deleted.');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (!ready) return <div className="loading-screen"><span className="brand-mark"><Clock3 size={17} /></span></div>;
   if (!user) return <Login onLogin={setUser} />;
 
@@ -166,15 +207,15 @@ function App() {
       ? <Overview user={user} jobs={jobs} timeEntries={timeEntries} photos={photos} contacts={contacts} todayJobs={todaysJobs} onNavigate={setPage} onNewJob={() => setModal({ type: 'job' })} onMessage={() => setPage('Messages')} />
       : <CleanerDay user={user} jobs={jobs} timeEntries={timeEntries} activeEntry={activeEntry} onClock={clock} onUpload={(job) => setModal({ type: 'photo', job })} />;
   } else if (displayPage === 'Schedule') {
-    content = <Schedule jobs={jobs} onNewJob={() => setModal({ type: 'job' })} onEdit={(job) => setModal({ type: 'job', job })} onMessage={(job) => { setChatPeer(job.cleanerEmail); setChatJob(job.id); setPage('Messages'); }} />;
+    content = <Schedule jobs={jobs} onNewJob={() => setModal({ type: 'job' })} onEdit={(job) => setModal({ type: 'job', job })} onDelete={deleteJob} onMessage={(job) => { setChatPeer(job.cleanerEmail); setChatJob(job.id); setPage('Messages'); }} />;
   } else if (displayPage === 'Time cards') {
     content = <TimeCards entries={timeEntries} isAdmin={isAdmin} hoursTotal={hoursTotal} />;
   } else if (displayPage === 'Photos') {
     content = <PhotoGallery photos={photos} jobs={jobs} isAdmin={isAdmin} onUpload={(job) => setModal({ type: 'photo', job })} />;
   } else if (displayPage === 'Team') {
-    content = <Team users={users} jobs={jobs} onAdd={() => setModal({ type: 'user' })} onMessage={() => setPage('Messages')} />;
+    content = <Team users={users} jobs={jobs} onAdd={() => setModal({ type: 'user' })} onDelete={deleteUser} onMessage={() => setPage('Messages')} />;
   } else {
-    content = <Chat user={user} contacts={contacts} jobs={jobs} initialPeer={chatPeer} initialJob={chatJob} />;
+    content = <Chat user={user} contacts={contacts} jobs={jobs} initialPeer={chatPeer} initialJob={chatJob} onNotify={setNotice} />;
   }
 
   return (
@@ -199,7 +240,7 @@ function App() {
         </div>
       </main>
       {notice && <div className="toast"><Check size={16} />{notice}</div>}
-      {modal?.type === 'job' && <JobModal key={modal.job?.id || 'new-job'} users={users} job={modal.job} onClose={() => setModal(null)} onSaved={async () => { setModal(null); await refresh(); setNotice(modal.job ? 'Job details updated.' : 'Job added to the schedule.'); }} />}
+      {modal?.type === 'job' && <JobModal key={modal.job?.id || 'new-job'} users={users} job={modal.job} onClose={() => setModal(null)} onSaved={async (savedJob) => { setModal(null); await refresh(); setNotice(savedJob.emailNotification?.status === 'not_configured' ? 'Job saved, but SMTP email notifications are not configured.' : savedJob.emailNotification?.status === 'failed' ? 'Job saved, but its email notification could not be sent.' : modal.job ? 'Job details updated.' : 'Job added to the schedule.'); }} />}
       {modal?.type === 'photo' && <PhotoModal job={modal.job} jobs={jobs} onClose={() => setModal(null)} onSaved={async () => { setModal(null); await refresh(); setNotice('Photo added to the job.'); }} />}
       {modal?.type === 'user' && <UserModal onClose={() => setModal(null)} onSaved={async () => { setModal(null); await refresh(); setNotice('Team member added.'); }} />}
       {mobileNav && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
@@ -279,10 +320,10 @@ function CleanerJob({ job, activeEntry, onClock, onUpload }) {
   return <article className={`cleaner-job ${isActive ? 'cleaner-job-active' : ''}`}><div className="cleaner-job-time"><span>{formatClock(job.startTime)}</span><i /><span>{formatClock(job.endTime)}</span></div><div className="cleaner-job-main"><div className="cleaner-job-heading"><div><span className="eyebrow">{job.id} · {formatDate(job.date)}</span><h3>{job.address.split(',')[0]}</h3><span className="job-address"><MapPin size={14} />{job.address}</span></div><span className={`status-pill status-${job.status.toLowerCase().replace(' ', '-')}`}><i />{job.status}</span></div><p className="job-instructions">{job.instructions || 'No special instructions.'}</p><div className="cleaner-job-actions"><button className={`button ${isActive ? 'button-coral' : 'button-dark'}`} disabled={!canClock || job.status === 'Completed'} onClick={() => onClock(job, isActive)}>{isActive ? <><ArrowDownLeft size={15} />Clock out</> : <><Clock3 size={15} />Clock in</>}</button><button className="outline-button" onClick={() => onUpload(job)}><Camera size={15} />Add job photo</button></div></div><div className="cleaner-job-side"><span className="side-number">{job.id.slice(-3)}</span><span>ASSIGNMENT</span></div></article>;
 }
 
-function Schedule({ jobs, onNewJob, onEdit, onMessage }) {
+function Schedule({ jobs, onNewJob, onEdit, onDelete, onMessage }) {
   return <><PageHeading eyebrow="OPERATIONS" title="Schedule" detail="Every visit, assigned and accounted for." action={<button className="button button-dark" onClick={onNewJob}><Plus size={16} /> New job</button>} />
     <div className="schedule-toolbar"><span className="eyebrow">ALL ASSIGNMENTS <b>{jobs.length}</b></span><span className="toolbar-date"><CalendarDays size={15} />Upcoming and recent</span></div>
-    <div className="surface table-surface"><table><thead><tr><th>JOB</th><th>DATE & TIME</th><th>ADDRESS</th><th>CLEANER</th><th>STATUS</th><th /></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td><span className="table-job-id">{job.id}</span></td><td><b>{formatDate(job.date)}</b><small>{formatClock(job.startTime)} – {formatClock(job.endTime)}</small></td><td><b>{job.address.split(',')[0]}</b><small>{job.address}</small></td><td><span className="table-person"><span className="tiny-avatar">{initials(job.cleaner_name)}</span>{job.cleaner_name}</span></td><td><span className={`status-pill status-${job.status.toLowerCase().replace(' ', '-')}`}><i />{job.status}</span></td><td><button className="icon-button row-message" onClick={() => onEdit(job)} title={`Edit ${job.id}`}><Pencil size={15} /></button><button className="icon-button row-message" onClick={() => onMessage(job)} title={`Message ${job.cleaner_name}`}><MessageCircle size={16} /></button></td></tr>)}</tbody></table>{!jobs.length && <EmptyState icon={CalendarDays} title="The schedule is clear" detail="Create a job to get the team moving." />}</div>
+    <div className="surface table-surface"><table><thead><tr><th>JOB</th><th>DATE & TIME</th><th>ADDRESS</th><th>CLEANER</th><th>STATUS</th><th /></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td><span className="table-job-id">{job.id}</span></td><td><b>{formatDate(job.date)}</b><small>{formatClock(job.startTime)} – {formatClock(job.endTime)}</small></td><td><b>{job.address.split(',')[0]}</b><small>{job.address}</small></td><td><span className="table-person"><span className="tiny-avatar">{initials(job.cleaner_name)}</span>{job.cleaner_name}</span></td><td><span className={`status-pill status-${job.status.toLowerCase().replace(' ', '-')}`}><i />{job.status}</span></td><td><button className="icon-button row-message" onClick={() => onEdit(job)} title={`Edit ${job.id}`}><Pencil size={15} /></button><button className="icon-button row-message" onClick={() => onMessage(job)} title={`Message ${job.cleaner_name}`}><MessageCircle size={16} /></button><button className="icon-button row-delete" onClick={() => onDelete(job)} title={`Delete ${job.id}`}><Trash2 size={15} /></button></td></tr>)}</tbody></table>{!jobs.length && <EmptyState icon={CalendarDays} title="The schedule is clear" detail="Create a job to get the team moving." />}</div>
   </>;
 }
 
@@ -303,15 +344,15 @@ function PhotoGallery({ photos, jobs, isAdmin, onUpload }) {
   </>;
 }
 
-function Team({ users, jobs, onAdd, onMessage }) {
+function Team({ users, jobs, onAdd, onDelete, onMessage }) {
   const cleaners = users.filter((person) => person.role === 'Cleaner');
   return <><PageHeading eyebrow="YOUR PEOPLE" title="The team" detail="The people keeping every place in good shape." action={<button className="button button-dark" onClick={onAdd}><Plus size={16} /> Add teammate</button>} />
     <div className="team-summary-row"><span className="team-count"><b>{cleaners.length.toString().padStart(2, '0')}</b> cleaners</span><span className="team-count"><b>{jobs.filter((job) => job.status === 'In Progress').length.toString().padStart(2, '0')}</b> on site now</span><span className="team-summary-note"><span className="live-dot" />Everything is running smoothly</span></div>
-    <div className="team-grid">{cleaners.map((person, index) => { const assigned = jobs.filter((job) => job.cleanerEmail === person.email); const active = assigned.find((job) => job.status === 'In Progress'); return <article className="team-card" key={person.email}><div className={`team-card-top team-tone-${index % 3}`}><span className="team-card-avatar">{initials(person.name)}</span><span className={`status-pill ${active ? 'status-progress' : 'status-pending'}`}><i />{active ? 'On site' : 'Available'}</span><span className="team-decoration">{String(index + 1).padStart(2, '0')}</span></div><div className="team-card-body"><span className="eyebrow">CLEANING TEAM</span><h3>{person.name}</h3><p>{person.email}</p><div className="team-card-details"><span><CalendarDays size={14} />{assigned.length} assigned jobs</span><span><CheckCheck size={14} />{assigned.filter((job) => job.status === 'Completed').length} completed</span></div>{active && <div className="team-current-job"><span className="live-dot" />Currently at <b>{active.address.split(',')[0]}</b></div>}<button className="outline-button team-message" onClick={() => onMessage(person.email)}><MessageCircle size={15} />Send a message</button></div></article>; })}</div>
+    <div className="team-grid">{cleaners.map((person, index) => { const assigned = jobs.filter((job) => job.cleanerEmail === person.email); const active = assigned.find((job) => job.status === 'In Progress'); return <article className="team-card" key={person.email}><div className={`team-card-top team-tone-${index % 3}`}><span className="team-card-avatar">{initials(person.name)}</span><span className={`status-pill ${active ? 'status-progress' : 'status-pending'}`}><i />{active ? 'On site' : 'Available'}</span><span className="team-decoration">{String(index + 1).padStart(2, '0')}</span></div><div className="team-card-body"><span className="eyebrow">CLEANING TEAM</span><h3>{person.name}</h3><p>{person.email}</p><div className="team-card-details"><span><CalendarDays size={14} />{assigned.length} assigned jobs</span><span><CheckCheck size={14} />{assigned.filter((job) => job.status === 'Completed').length} completed</span></div>{active && <div className="team-current-job"><span className="live-dot" />Currently at <b>{active.address.split(',')[0]}</b></div>}<div className="team-card-actions"><button className="outline-button team-message" onClick={() => onMessage(person.email)}><MessageCircle size={15} />Send a message</button><button className="icon-button row-delete team-delete" onClick={() => onDelete(person)} title={`Delete ${person.name}`} aria-label={`Delete ${person.name}`}><Trash2 size={15} /></button></div></div></article>; })}</div>
   </>;
 }
 
-function Chat({ user, contacts, jobs, initialPeer, initialJob }) {
+function Chat({ user, contacts, jobs, initialPeer, initialJob, onNotify }) {
   const [peer, setPeer] = useState(initialPeer || '');
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
@@ -350,6 +391,8 @@ function Chat({ user, contacts, jobs, initialPeer, initialJob }) {
       const message = await api('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receiverEmail: peer, content: draft.trim(), jobId: jobId || null }) });
       setMessages((previous) => previous.some((item) => item.messageId === message.messageId) ? previous : [...previous, message]);
       setDraft('');
+      if (message.emailNotification?.status === 'not_configured') onNotify('Message sent, but SMTP email notifications are not configured.');
+      if (message.emailNotification?.status === 'failed') onNotify('Message sent, but its email notification could not be sent.');
     } catch (err) {
       window.alert(err.message);
     } finally {
@@ -376,7 +419,7 @@ function JobModal({ users, job, onClose, onSaved }) {
   const update = (key) => (event) => setForm((previous) => ({ ...previous, [key]: event.target.value }));
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError('');
-    try { await api(job ? `/api/jobs/${job.id}` : '/api/jobs', { method: job ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }); await onSaved(); }
+    try { const savedJob = await api(job ? `/api/jobs/${job.id}` : '/api/jobs', { method: job ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }); await onSaved(savedJob); }
     catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   return <Modal title={job ? `Edit ${job.id}` : 'Schedule a job'} eyebrow={job ? 'UPDATE ASSIGNMENT' : 'NEW ASSIGNMENT'} onClose={onClose}><form className="modal-form" onSubmit={submit}><label>Service address<input value={form.address} onChange={update('address')} placeholder="Street address, city" required /></label><div className="form-two"><label>Date<input type="date" value={form.date} onChange={update('date')} required /></label><label>Assign cleaner<select value={form.cleanerEmail} onChange={update('cleanerEmail')} required>{cleaners.map((person) => <option key={person.email} value={person.email}>{person.name}</option>)}</select></label></div><div className="form-two"><label>Start time<input type="time" value={form.startTime} onChange={update('startTime')} required /></label><label>End time<input type="time" value={form.endTime} onChange={update('endTime')} required /></label></div><label>Instructions<textarea value={form.instructions} onChange={update('instructions')} placeholder="Entry details, priorities, supplies…" rows="3" /></label>{error && <p className="form-error">{error}</p>}<div className="modal-actions"><button className="outline-button" type="button" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy || !cleaners.length}>{busy ? 'Saving…' : job ? 'Save changes' : 'Add to schedule'}<ArrowRight size={15} /></button></div>{!cleaners.length && <p className="form-error">Add a cleaner to the team before scheduling.</p>}</form></Modal>;

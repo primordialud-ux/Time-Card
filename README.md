@@ -11,7 +11,7 @@ npm run dev
 
 Open the Vite URL printed by the dev server (usually `http://localhost:5173`). The API listens on port `3000`.
 
-The root `.env` configures the API port and SQLite database path. Copy `.env.example` to `.env` to create local settings; the Vite proxy reads the same `PORT` value.
+The root `.env` configures the API port, SQLite database path, and optional email delivery. Copy `.env.example` to `.env` to create local settings; the Vite proxy reads the same `PORT` value. To enable assignment and chat email notifications, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`; `SMTP_FROM` and `APP_URL` are optional. Without SMTP settings, saved jobs and messages still work and the API logs that email delivery is not configured.
 
 Demo accounts use the password `welcome123`:
 
@@ -25,9 +25,10 @@ For a production-style local run, build the frontend with `npm run build`, then 
 
 ## Workflows
 
-- Managers can create and edit job assignments, assign cleaners, inspect all time cards and photos, add team accounts, and message cleaners.
+- Managers can create and edit job assignments, assign cleaners, inspect all time cards and photos, add team accounts, and message cleaners. Jobs and cleaner accounts can be deleted when they have no linked records.
 - Cleaners see only their assigned work, clock in and out, attach before/after photos with notes, and message the manager.
 - Chat messages are stored in SQLite and delivered over Socket.IO to the sender and recipient. Job-specific messages can be linked to an assignment.
+- When SMTP is configured, cleaners receive email when a job is assigned or when they receive a chat message. Reassigning a job notifies its new cleaner.
 - Uploaded images are stored under `server/uploads`; the SQLite database is created at `server/data/timecard.sqlite`.
 
 ## Data model
@@ -54,6 +55,8 @@ All `/api` routes use the login session cookie unless noted.
 | `GET`, `POST` | `/api/users` | Signed in, admin to create | List visible users or add a teammate |
 | `GET`, `POST` | `/api/jobs` | Signed in, admin to create | List scoped jobs or schedule a job |
 | `PUT` | `/api/jobs/:id` | Admin | Edit an assignment or cleaner |
+| `DELETE` | `/api/jobs/:id` | Admin | Delete a job with no linked time entries, photos, or messages |
+| `DELETE` | `/api/users/:email` | Admin | Delete a cleaner with no jobs or associated history/messages |
 | `PATCH` | `/api/jobs/:id/status` | Assigned cleaner or admin | Update a job status |
 | `GET` | `/api/time` | Signed in | List scoped time entries |
 | `POST` | `/api/jobs/:id/clock-in` | Assigned cleaner | Start a time entry |

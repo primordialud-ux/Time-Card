@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
+import { sendJobAssignmentEmail, sendNewMessageEmail } from './email.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(root, 'data');
@@ -55,6 +56,7 @@ const userCount = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
 if (!userCount) {
   const insertUser = db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)');
   const password = bcrypt.hashSync('welcome123', 10);
+  insertUser.run('primordialud@gmail.com', 'Morgan Lee', 'Admin', password);
   insertUser.run('your@email.com', 'Morgan Lee', 'Admin', password);
   insertUser.run('cleaner@email.com', 'Jamie Chen', 'Cleaner', password);
   insertUser.run('alex@timecard.local', 'Alex Rivera', 'Cleaner', password);
@@ -91,6 +93,7 @@ app.use(sessionMiddleware);
 app.use('/uploads', express.static(uploadDir));
 io.engine.use(sessionMiddleware);
 
+const ADMIN_EMAIL = 'primordialud@gmail.com';
 const publicUser = (user) => ({ email: user.email, name: user.name, role: user.role });
 const requireAuth = (req, res, next) => req.session.user ? next() : res.status(401).json({ error: 'Sign in to continue.' });
 const requireAdmin = (req, res, next) => req.session.user?.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin access required.' });
@@ -106,6 +109,31 @@ app.post('/api/auth/login', (req, res) => {
   if (!user || !bcrypt.compareSync(String(password || ''), user.password_hash)) return res.status(401).json({ error: 'Email or password is incorrect.' });
   req.session.user = publicUser(user);
   res.json({ user: req.session.user });
+});
+app.post('/api/signup', (req, res) => {
+  const { name, email, password } = req.body || {};
+  const trimmedName = String(name || '').trim();
+  const trimmedEmail = String(email || '').trim().toLowerCase();
+  const trimmedPassword = String(password || '');
+
+  if (!trimmedName || !trimmedEmail || !trimmedPassword) {
+    return res.status(400).json({ error: 'Name, email, and password are required.' });
+  }
+  if (trimmedPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+  if (db.prepare('SELECT email FROM users WHERE email = ?').get(trimmedEmail)) {
+    return res.status(409).json({ error: 'An account with that email already exists.' });
+  }
+
+  const role = trimmedEmail === ADMIN_EMAIL ? 'Admin' : 'Cleaner';
+  const passwordHash = bcrypt.hashSync(trimmedPassword, 10);
+  db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)')
+    .run(trimmedEmail, trimmedName, role, passwordHash);
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(trimmedEmail);
+  req.session.user = publicUser(user);
+  res.status(201).json({ user: req.session.user, role });
 });
 app.get('/api/auth/me', (req, res) => res.json({ user: req.session.user || null }));
 app.post('/api/auth/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
@@ -126,6 +154,25 @@ app.post('/api/users', requireAuth, requireAdmin, (req, res) => {
     res.status(409).json({ error: 'A user with that email already exists.' });
   }
 });
+app.delete('/api/users/:email', requireAuth, requireAdmin, (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const user = db.prepare("SELECT email, role FROM users WHERE email = ?").get(email);
+  if (!user || user.role !== 'Cleaner') return res.status(404).json({ error: 'Cleaner not found.' });
+
+  const relatedRecords = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM jobs WHERE cleaner_email = @email) +
+      (SELECT COUNT(*) FROM time_entries WHERE cleaner_email = @email) +
+      (SELECT COUNT(*) FROM photos WHERE cleaner_email = @email) +
+      (SELECT COUNT(*) FROM messages WHERE sender_email = @email OR receiver_email = @email) AS count
+  `).get({ email }).count;
+  if (relatedRecords) {
+    return res.status(409).json({ error: 'This cleaner has jobs, time entries, photos, or messages. Remove those records before deleting the team member.' });
+  }
+
+  db.prepare('DELETE FROM users WHERE email = ?').run(email);
+  res.status(204).end();
+});
 
 app.get('/api/jobs', requireAuth, (req, res) => {
   const rows = req.session.user.role === 'Admin'
@@ -133,21 +180,53 @@ app.get('/api/jobs', requireAuth, (req, res) => {
     : db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE cleaner_email = ? ORDER BY date, start_time').all(req.session.user.email);
   res.json(rows.map(jobShape));
 });
-app.post('/api/jobs', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/jobs', requireAuth, requireAdmin, async (req, res) => {
   const { date, startTime, endTime, address, instructions = '', cleanerEmail } = req.body || {};
   if (!date || !startTime || !endTime || !address || !cleanerEmail) return res.status(400).json({ error: 'Date, times, address, and cleaner are required.' });
-  if (!db.prepare("SELECT email FROM users WHERE email = ? AND role = 'Cleaner'").get(cleanerEmail)) return res.status(400).json({ error: 'Choose a valid cleaner.' });
+  const cleaner = db.prepare("SELECT email, name FROM users WHERE email = ? AND role = 'Cleaner'").get(cleanerEmail);
+  if (!cleaner) return res.status(400).json({ error: 'Choose a valid cleaner.' });
   const id = `J${randomUUID().slice(0, 6).toUpperCase()}`;
   db.prepare('INSERT INTO jobs (id, date, start_time, end_time, address, instructions, cleaner_email) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, date, startTime, endTime, address, instructions, cleanerEmail);
-  res.status(201).json(jobShape(db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE id = ?').get(id)));
+  const job = db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE id = ?').get(id);
+  const emailNotification = await sendJobAssignmentEmail(job, cleaner).catch((error) => {
+    console.error('Failed to send job assignment email:', error);
+    return { status: 'failed' };
+  });
+  res.status(201).json({ ...jobShape(job), emailNotification });
 });
-app.put('/api/jobs/:id', requireAuth, requireAdmin, (req, res) => {
+app.put('/api/jobs/:id', requireAuth, requireAdmin, async (req, res) => {
   const { date, startTime, endTime, address, instructions = '', cleanerEmail } = req.body || {};
   if (!date || !startTime || !endTime || !address || !cleanerEmail) return res.status(400).json({ error: 'Date, times, address, and cleaner are required.' });
-  if (!db.prepare("SELECT email FROM users WHERE email = ? AND role = 'Cleaner'").get(cleanerEmail)) return res.status(400).json({ error: 'Choose a valid cleaner.' });
+  const cleaner = db.prepare("SELECT email, name FROM users WHERE email = ? AND role = 'Cleaner'").get(cleanerEmail);
+  if (!cleaner) return res.status(400).json({ error: 'Choose a valid cleaner.' });
+  const previousJob = db.prepare('SELECT cleaner_email FROM jobs WHERE id = ?').get(req.params.id);
   const result = db.prepare('UPDATE jobs SET date = ?, start_time = ?, end_time = ?, address = ?, instructions = ?, cleaner_email = ? WHERE id = ?').run(date, startTime, endTime, address, instructions, cleanerEmail, req.params.id);
   if (!result.changes) return res.status(404).json({ error: 'Job not found.' });
-  res.json(jobShape(db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE id = ?').get(req.params.id)));
+  const job = db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE id = ?').get(req.params.id);
+  const emailNotification = previousJob.cleaner_email !== cleanerEmail
+    ? await sendJobAssignmentEmail(job, cleaner).catch((error) => {
+      console.error('Failed to send job assignment email:', error);
+      return { status: 'failed' };
+    })
+    : null;
+  res.json({ ...jobShape(job), ...(emailNotification && { emailNotification }) });
+});
+app.delete('/api/jobs/:id', requireAuth, requireAdmin, (req, res) => {
+  const job = db.prepare('SELECT id FROM jobs WHERE id = ?').get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found.' });
+
+  const relatedRecords = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM time_entries WHERE job_id = @id) +
+      (SELECT COUNT(*) FROM photos WHERE job_id = @id) +
+      (SELECT COUNT(*) FROM messages WHERE job_id = @id) AS count
+  `).get({ id: job.id }).count;
+  if (relatedRecords) {
+    return res.status(409).json({ error: 'This job has linked time entries, photos, or messages. Remove those records before deleting the job.' });
+  }
+
+  db.prepare('DELETE FROM jobs WHERE id = ?').run(job.id);
+  res.status(204).end();
 });
 app.patch('/api/jobs/:id/status', requireAuth, (req, res) => {
   const { status } = req.body || {};
@@ -231,7 +310,7 @@ app.get('/api/messages', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT * FROM messages WHERE ((sender_email = ? AND receiver_email = ?) OR (sender_email = ? AND receiver_email = ?)) AND (job_id IS ? OR ? IS NULL) ORDER BY timestamp`).all(req.session.user.email, peer, peer, req.session.user.email, req.query.jobId || null, req.query.jobId || null);
   res.json(rows.map(messageShape));
 });
-app.post('/api/messages', requireAuth, (req, res) => {
+app.post('/api/messages', requireAuth, async (req, res) => {
   const { receiverEmail, jobId = null, content } = req.body || {};
   const receiver = db.prepare('SELECT * FROM users WHERE email = ?').get(String(receiverEmail || ''));
   if (!receiver || receiver.email === req.session.user.email) return res.status(400).json({ error: 'Choose a valid recipient.' });
@@ -242,7 +321,12 @@ app.post('/api/messages', requireAuth, (req, res) => {
   db.prepare('INSERT INTO messages (id, sender_email, receiver_email, job_id, content, timestamp) VALUES (@id, @sender_email, @receiver_email, @job_id, @content, @timestamp)').run(message);
   const shaped = messageShape(message);
   io.to(`user:${message.sender_email}`).to(`user:${message.receiver_email}`).emit('message:new', shaped);
-  res.status(201).json(shaped);
+  const sender = db.prepare('SELECT name FROM users WHERE email = ?').get(message.sender_email);
+  const emailNotification = await sendNewMessageEmail(receiver, sender, message.content).catch((error) => {
+    console.error('Failed to send new-message email:', error);
+    return { status: 'failed' };
+  });
+  res.status(201).json({ ...shaped, emailNotification });
 });
 
 io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
