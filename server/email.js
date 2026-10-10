@@ -3,14 +3,14 @@ import nodemailer from 'nodemailer';
 let transporter;
 
 function getTransporter() {
-  const missing = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS']
+  const missing = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']
     .filter((name) => !process.env[name]);
   if (missing.length) {
     console.warn(`Email notification skipped; configure ${missing.join(', ')} in .env.`);
     return null;
   }
 
-  const port = Number(process.env.SMTP_PORT);
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('SMTP_PORT must be a valid port number.');
   }
@@ -19,7 +19,7 @@ function getTransporter() {
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port,
-      secure: port === 465,
+      secure: false,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
   }

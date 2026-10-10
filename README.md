@@ -15,7 +15,7 @@ npm run dev
 
 Open the Vite URL printed by the dev server (usually `http://localhost:5173`). The API listens on port `3000`.
 
-The root `.env` configures the API port, SQLite database path, and optional email delivery. Copy `.env.example` to `.env` to create local settings; the Vite proxy reads the same `PORT` value. To enable assignment and chat email notifications, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`; `SMTP_FROM` and `APP_URL` are optional. Without SMTP settings, saved jobs and messages still work and the API logs that email delivery is not configured.
+The root `.env` configures the API port, SQLite database path, and optional email delivery. Copy `.env.example` to `.env` to create local settings; the Vite proxy reads the same `PORT` value. To enable assignment, chat, and password reset emails, set `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`; `SMTP_PORT` defaults to `587`, while `SMTP_FROM` and `APP_URL` are optional. Without SMTP settings, saved jobs and messages still work and the API logs that email delivery is not configured.
 
 Demo accounts use the password `welcome123`:
 
