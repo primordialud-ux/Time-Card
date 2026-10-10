@@ -4,13 +4,11 @@ import express from 'express';
 import session from 'express-session';
 import multer from 'multer';
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
-import { sendJobAssignmentEmail, sendNewMessageEmail } from './email.js';
 import { sendJobAssignmentEmail, sendNewMessageEmail, sendPasswordResetEmail } from './email.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));

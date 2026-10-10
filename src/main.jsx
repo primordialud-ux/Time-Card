@@ -99,8 +99,7 @@ function Login({ onLogin }) {
             {mode === 'signup' && (
               <label>Full name<input type="text" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="Jordan Smith" required /></label>
             )}
-            <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={mode === 'signup' ? 'email' : 'username'} required /></label>
-            {(mode === 'login' || mode === 'signup' || mode === 'forgot') && <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={mode === 'signup' || mode === 'forgot' ? 'email' : 'username'} required /></label>}
+            <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={mode === 'signup' || mode === 'forgot' ? 'email' : 'username'} required /></label>
             {(mode === 'login' || mode === 'signup' || mode === 'reset') && <label>{mode === 'reset' ? 'New password' : 'Password'}<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'signup' || mode === 'reset' ? 'new-password' : 'current-password'} minLength="6" required /></label>}
             {mode === 'reset' && <label>Confirm new password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength="6" required /></label>}
             {error && <p className="form-error">{error}</p>}
