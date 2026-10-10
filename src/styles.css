@@ -75,6 +75,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .demo-password { margin: 5px 0 0; text-align: center; }
 .demo-password b { color: #59665b; }
 .form-error { margin: 0; color: #b34836; font-size: 12px; line-height: 1.5; }
+.form-success { margin: 0; color: #37684d; font-size: 12px; line-height: 1.5; }
+.login-secondary-action { display: block; margin: 15px auto 0; padding: 4px; border: 0; color: #547659; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; }
+.login-secondary-action:hover { color: #203e35; text-decoration: underline; }
 .login-copyright { position: absolute; right: 8%; bottom: 24px; color: #a6aaa2; font-size: 9px; font-weight: 700; letter-spacing: .1em; }
 .mobile-brand { display: none; }
 

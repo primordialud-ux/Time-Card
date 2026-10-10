@@ -20,28 +20,50 @@ const formatTime = (time) => time ? new Date(time).toLocaleTimeString('en-US', {
 const initials = (name = '') => name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
 function Login({ onLogin }) {
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] = useState(() => new URLSearchParams(window.location.search).has('resetToken') ? 'reset' : 'login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('cleaner@email.com');
   const [password, setPassword] = useState('welcome123');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const resetToken = new URLSearchParams(window.location.search).get('resetToken') || '';
 
   async function submit(event) {
     event.preventDefault();
+    if (mode === 'reset' && password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
     setBusy(true);
     setError('');
+    setStatus('');
     try {
-      const endpoint = mode === 'signup' ? '/api/signup' : '/api/auth/login';
-      const payload = mode === 'signup'
-        ? { name, email, password }
-        : { email, password };
+      const endpoint = mode === 'signup' ? '/api/signup'
+        : mode === 'forgot' ? '/api/auth/password-reset/request'
+          : mode === 'reset' ? '/api/auth/password-reset/confirm'
+            : '/api/auth/login';
+      const payload = mode === 'signup' ? { name, email, password }
+        : mode === 'forgot' ? { email }
+          : mode === 'reset' ? { token: resetToken, password }
+            : { email, password };
       const result = await api(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      onLogin(result.user);
+      if (mode === 'login' || mode === 'signup') {
+        onLogin(result.user);
+      } else if (mode === 'forgot') {
+        setStatus(result.message);
+      } else {
+        setMode('login');
+        setPassword('');
+        setConfirmPassword('');
+        window.history.replaceState({}, '', window.location.pathname);
+        setStatus('Your password has been reset. Sign in with your new password.');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -65,21 +87,28 @@ function Login({ onLogin }) {
         <div className="login-card">
           <div className="mobile-brand brand"><span className="brand-mark"><Clock3 size={17} /></span><span>timecard</span></div>
           <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
-            <button type="button" className={mode === 'login' ? 'auth-toggle-button active' : 'auth-toggle-button'} onClick={() => setMode('login')}>Sign in</button>
-            <button type="button" className={mode === 'signup' ? 'auth-toggle-button active' : 'auth-toggle-button'} onClick={() => setMode('signup')}>Create account</button>
+            {mode !== 'forgot' && mode !== 'reset' && <>
+              <button type="button" className={mode === 'login' ? 'auth-toggle-button active' : 'auth-toggle-button'} onClick={() => { setMode('login'); setError(''); setStatus(''); }}>Sign in</button>
+              <button type="button" className={mode === 'signup' ? 'auth-toggle-button active' : 'auth-toggle-button'} onClick={() => { setMode('signup'); setError(''); setStatus(''); }}>Create account</button>
+            </>}
           </div>
-          <span className="eyebrow">{mode === 'signup' ? 'JOIN THE TEAM' : 'WELCOME BACK'}</span>
-          <h2>{mode === 'signup' ? 'Create your account' : 'Sign in to your workspace'}</h2>
-          <p className="muted">{mode === 'signup' ? 'Set up your profile and get assigned work right away.' : 'Your team’s day, all in good order.'}</p>
+          <span className="eyebrow">{mode === 'signup' ? 'JOIN THE TEAM' : mode === 'forgot' ? 'ACCOUNT RECOVERY' : mode === 'reset' ? 'CHOOSE A NEW PASSWORD' : 'WELCOME BACK'}</span>
+          <h2>{mode === 'signup' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : mode === 'reset' ? 'Choose a new password' : 'Sign in to your workspace'}</h2>
+          <p className="muted">{mode === 'signup' ? 'Set up your profile and get assigned work right away.' : mode === 'forgot' ? 'We’ll email a secure reset link if an account matches.' : mode === 'reset' ? 'Use at least 6 characters for your new password.' : 'Your team’s day, all in good order.'}</p>
           <form onSubmit={submit} className="login-form">
             {mode === 'signup' && (
               <label>Full name<input type="text" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="Jordan Smith" required /></label>
             )}
             <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={mode === 'signup' ? 'email' : 'username'} required /></label>
-            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength="6" required /></label>
+            {(mode === 'login' || mode === 'signup' || mode === 'forgot') && <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={mode === 'signup' || mode === 'forgot' ? 'email' : 'username'} required /></label>}
+            {(mode === 'login' || mode === 'signup' || mode === 'reset') && <label>{mode === 'reset' ? 'New password' : 'Password'}<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'signup' || mode === 'reset' ? 'new-password' : 'current-password'} minLength="6" required /></label>}
+            {mode === 'reset' && <label>Confirm new password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength="6" required /></label>}
             {error && <p className="form-error">{error}</p>}
-            <button className="button button-dark button-full" disabled={busy}>{busy ? (mode === 'signup' ? 'Creating account…' : 'Signing in…') : (mode === 'signup' ? 'Create account' : 'Sign in')}<ArrowRight size={16} /></button>
+            {status && <p className="form-success" role="status">{status}</p>}
+            <button className="button button-dark button-full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : mode === 'reset' ? 'Save new password' : 'Sign in'}<ArrowRight size={16} /></button>
           </form>
+          {mode === 'login' && <button type="button" className="login-secondary-action" onClick={() => { setMode('forgot'); setError(''); setStatus(''); }}>Forgot password?</button>}
+          {(mode === 'forgot' || mode === 'reset') && <button type="button" className="login-secondary-action" onClick={() => { setMode('login'); setError(''); setStatus(''); window.history.replaceState({}, '', window.location.pathname); }}>Back to sign in</button>}
           {mode === 'login' && (
             <div className="demo-access">
               <span className="eyebrow">DEMO ACCESS</span>

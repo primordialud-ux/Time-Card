@@ -106,3 +106,28 @@ export function sendNewMessageEmail(recipient, sender, content) {
     html,
   });
 }
+
+export function sendPasswordResetEmail(user, token) {
+  const appUrl = (process.env.APP_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const resetUrl = `${appUrl}/?resetToken=${encodeURIComponent(token)}`;
+  const text = [
+    `Hi ${user.name},`,
+    '',
+    'Use the link below to reset your TimeCard password. This link expires in 30 minutes and can only be used once.',
+    '',
+    resetUrl,
+    '',
+    'If you did not request a password reset, you can ignore this email.',
+  ].join('\n');
+  const html = `<p>Hi ${escapeHtml(user.name)},</p>
+    <p>Use the link below to reset your TimeCard password. This link expires in 30 minutes and can only be used once.</p>
+    <p><a href="${escapeHtml(resetUrl)}">Reset your password</a></p>
+    <p>If you did not request a password reset, you can ignore this email.</p>`;
+
+  return sendEmail({
+    to: user.email,
+    subject: 'Reset your TimeCard password',
+    text,
+    html,
+  });
+}

@@ -1,3 +1,7 @@
+-To enable assignment and chat email notifications, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`; `SMTP_FROM` and `APP_URL` are optional. Without SMTP settings, saved jobs and messages still work and the API logs that email delivery is not configured.
++To enable assignment, chat, and password reset emails, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`; `SMTP_FROM` and `APP_URL` are optional. Password reset links require SMTP delivery to be configured.
+- When SMTP is configured, cleaners receive email when a job is assigned or when they receive a chat message. Reassigning a job notifies its new cleaner.
+- Admins and cleaners can request a single-use password reset link by email; each link expires after 30 minutes.
 # TimeCard
 
 Cleaning-service operations app for scheduling jobs, tracking cleaner hours, collecting job photos, and coordinating through live chat.
@@ -50,6 +54,8 @@ All `/api` routes use the login session cookie unless noted.
 | Method | Endpoint | Access | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/login` | Public | Create a session from email and password |
+| `POST` | `/api/auth/password-reset/request` | Public | Email a reset link when the account exists |
+| `POST` | `/api/auth/password-reset/confirm` | Public | Set a new password with a valid reset token |
 | `GET` | `/api/auth/me` | Public | Read the current session user |
 | `POST` | `/api/auth/logout` | Signed in | End the session |
 | `GET`, `POST` | `/api/users` | Signed in, admin to create | List visible users or add a teammate |

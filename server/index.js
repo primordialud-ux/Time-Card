@@ -5,11 +5,13 @@ import session from 'express-session';
 import multer from 'multer';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { sendJobAssignmentEmail, sendNewMessageEmail } from './email.js';
+import { sendJobAssignmentEmail, sendNewMessageEmail, sendPasswordResetEmail } from './email.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(root, 'data');
@@ -28,6 +30,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     email TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('Admin', 'Cleaner')),
     password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash TEXT PRIMARY KEY, email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, date TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL,
@@ -109,6 +115,46 @@ app.post('/api/auth/login', (req, res) => {
   if (!user || !bcrypt.compareSync(String(password || ''), user.password_hash)) return res.status(401).json({ error: 'Email or password is incorrect.' });
   req.session.user = publicUser(user);
   res.json({ user: req.session.user });
+});
+app.post('/api/auth/password-reset/request', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const response = { message: 'If an account exists for that email, a password reset link will be sent.' };
+  const user = db.prepare('SELECT email, name FROM users WHERE email = ?').get(email);
+  if (!user) return res.json(response);
+
+  const token = randomBytes(32).toString('hex');
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  db.prepare('DELETE FROM password_reset_tokens WHERE email = ?').run(user.email);
+  db.prepare('INSERT INTO password_reset_tokens (token_hash, email, expires_at) VALUES (?, ?, ?)')
+    .run(tokenHash, user.email, Date.now() + 30 * 60 * 1000);
+  try {
+    const delivery = await sendPasswordResetEmail(user, token);
+    if (delivery.status !== 'sent') db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
+  } catch (error) {
+    db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
+    console.error('Failed to send password reset email:', error);
+  }
+  res.json(response);
+});
+app.post('/api/auth/password-reset/confirm', (req, res) => {
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const reset = db.prepare('SELECT email FROM password_reset_tokens WHERE token_hash = ? AND expires_at > ?').get(tokenHash, Date.now());
+  if (!reset) return res.status(400).json({ error: 'This password reset link is invalid or has expired.' });
+
+  const passwordHash = bcrypt.hashSync(password, 10);
+  const completeReset = db.transaction(() => {
+    const result = db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ? AND expires_at > ?').run(tokenHash, Date.now());
+    if (!result.changes) return false;
+    db.prepare('UPDATE users SET password_hash = ? WHERE email = ?').run(passwordHash, reset.email);
+    db.prepare('DELETE FROM password_reset_tokens WHERE email = ?').run(reset.email);
+    return true;
+  });
+  if (!completeReset()) return res.status(400).json({ error: 'This password reset link is invalid or has expired.' });
+  res.json({ ok: true });
 });
 app.post('/api/signup', (req, res) => {
   const { name, email, password } = req.body || {};
