@@ -31,7 +31,7 @@ For a production-style local run, build the frontend with `npm run build`, then 
 
 ## Workflows
 
-- Managers can create and edit job assignments, assign cleaners, inspect all time cards and photos, add team accounts, and message cleaners. Jobs and cleaner accounts can be deleted when they have no linked records.
+- Managers can create reusable team profiles, then select a profile when granting team access. Existing team accounts are kept in the profile directory; removing a team account leaves its profile available to add again. Managers can also create and edit job assignments, inspect all time cards and photos, and message cleaners.
 - Cleaners see only their assigned work, clock in and out, attach before/after photos with notes, and message the manager.
 - Chat messages are stored in SQLite and delivered over Socket.IO to the sender and recipient. Job-specific messages can be linked to an assignment.
 - When SMTP is configured, cleaners receive email when a job is assigned or when they receive a chat message. Reassigning a job notifies its new cleaner.
@@ -42,6 +42,7 @@ For a production-style local run, build the frontend with `npm run build`, then 
 | Table | Purpose |
 | --- | --- |
 | `users` | Email, name, role, and password hash |
+| `team_profiles` | Reusable name and email profiles, independent of team account access |
 | `jobs` | Schedule, address, instructions, status, and assigned cleaner |
 | `time_entries` | Clock-in/out timestamps and calculated decimal hours |
 | `photos` | Job-linked image URL, before/after type, notes, and timestamp |
@@ -60,7 +61,8 @@ All `/api` routes use the login session cookie unless noted.
 | `POST` | `/api/auth/password-reset/confirm` | Public | Set a new password with a valid reset token |
 | `GET` | `/api/auth/me` | Public | Read the current session user |
 | `POST` | `/api/auth/logout` | Signed in | End the session |
-| `GET`, `POST` | `/api/users` | Signed in, admin to create | List visible users or add a teammate |
+| `GET`, `POST` | `/api/users` | Signed in, admin to create | List visible users or add a teammate from an existing profile |
+| `GET`, `POST` | `/api/profiles` | Admin | List profiles and create a reusable profile |
 | `GET`, `POST` | `/api/jobs` | Signed in, admin to create | List scoped jobs or schedule a job |
 | `PUT` | `/api/jobs/:id` | Admin | Edit an assignment or cleaner |
 | `DELETE` | `/api/jobs/:id` | Admin | Delete a job with no linked time entries, photos, or messages |

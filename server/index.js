@@ -36,6 +36,9 @@ db.exec(`
     email TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('Admin', 'Cleaner')),
     password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS team_profiles (
+    email TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS password_reset_tokens (
     token_hash TEXT PRIMARY KEY, email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
     expires_at INTEGER NOT NULL
@@ -90,6 +93,7 @@ if (!userCount && isProduction) {
   db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)')
     .run(adminEmail, process.env.ADMIN_NAME?.trim() || 'Administrator', 'Admin', bcrypt.hashSync(adminPassword, 10));
 }
+db.prepare('INSERT OR IGNORE INTO team_profiles (email, name) SELECT email, name FROM users').run();
 if (isProduction) {
   const demoEmails = ['primordialud@gmail.com', 'your@email.com', 'cleaner@email.com', 'alex@timecard.local'];
   const seededUsers = db.prepare(`SELECT email, password_hash FROM users WHERE email IN (${demoEmails.map(() => '?').join(', ')})`).all(...demoEmails);
@@ -197,8 +201,12 @@ app.post('/api/signup', (req, res) => {
 
   const role = 'Cleaner';
   const passwordHash = bcrypt.hashSync(trimmedPassword, 10);
-  db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)')
-    .run(trimmedEmail, trimmedName, role, passwordHash);
+  db.transaction(() => {
+    db.prepare('INSERT INTO team_profiles (email, name) VALUES (?, ?) ON CONFLICT(email) DO UPDATE SET name = excluded.name')
+      .run(trimmedEmail, trimmedName);
+    db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)')
+      .run(trimmedEmail, trimmedName, role, passwordHash);
+  })();
 
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(trimmedEmail);
   req.session.user = publicUser(user);
@@ -213,14 +221,54 @@ app.get('/api/users', requireAuth, (req, res) => {
     : db.prepare("SELECT email, name, role FROM users WHERE role = 'Admin' ORDER BY name").all();
   res.json(users);
 });
-app.post('/api/users', requireAuth, requireAdmin, (req, res) => {
-  const { email, name, role = 'Cleaner', password = 'welcome123' } = req.body || {};
-  if (!email || !name || !['Cleaner', 'Admin'].includes(role)) return res.status(400).json({ error: 'Name, email, and a valid role are required.' });
+app.get('/api/profiles', requireAuth, requireAdmin, (_req, res) => {
+  const profiles = db.prepare(`
+    SELECT team_profiles.email, team_profiles.name,
+      EXISTS (SELECT 1 FROM users WHERE users.email = team_profiles.email) AS isTeamMember
+    FROM team_profiles
+    ORDER BY team_profiles.name
+  `).all();
+  res.json(profiles);
+});
+app.post('/api/profiles', requireAuth, requireAdmin, (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Enter a profile name and valid email address.' });
+  }
+  if (db.prepare('SELECT email FROM team_profiles WHERE email = ?').get(email)) {
+    return res.status(409).json({ error: 'A profile with that email already exists.' });
+  }
   try {
-    db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)').run(email.trim().toLowerCase(), name.trim(), role, bcrypt.hashSync(password, 10));
-    res.status(201).json(publicUser(db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim().toLowerCase())));
-  } catch {
-    res.status(409).json({ error: 'A user with that email already exists.' });
+    db.prepare('INSERT INTO team_profiles (email, name) VALUES (?, ?)').run(email, name);
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'A profile with that email already exists.' });
+    }
+    throw error;
+  }
+  res.status(201).json({ email, name, isTeamMember: false });
+});
+app.post('/api/users', requireAuth, requireAdmin, (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const role = req.body?.role || 'Cleaner';
+  const password = String(req.body?.password || '');
+  if (!email || !['Cleaner', 'Admin'].includes(role) || password.length < 8) {
+    return res.status(400).json({ error: 'Choose a profile, valid role, and password of at least 8 characters.' });
+  }
+  const profile = db.prepare('SELECT email, name FROM team_profiles WHERE email = ?').get(email);
+  if (!profile) return res.status(404).json({ error: 'Choose an existing profile.' });
+  if (db.prepare('SELECT email FROM users WHERE email = ?').get(email)) {
+    return res.status(409).json({ error: 'This profile already has team access.' });
+  }
+  try {
+    db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)').run(profile.email, profile.name, role, bcrypt.hashSync(password, 10));
+    res.status(201).json(publicUser(db.prepare('SELECT * FROM users WHERE email = ?').get(profile.email)));
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'This profile already has team access.' });
+    }
+    throw error;
   }
 });
 app.delete('/api/users/:email', requireAuth, requireAdmin, (req, res) => {

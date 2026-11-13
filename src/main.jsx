@@ -470,16 +470,69 @@ function PhotoModal({ job, jobs, onClose, onSaved }) {
 }
 
 function UserModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ name: '', email: '', role: 'Cleaner', password: 'welcome123' });
+  const [profiles, setProfiles] = useState([]);
+  const [selectedEmail, setSelectedEmail] = useState('');
+  const [form, setForm] = useState({ role: 'Cleaner', password: '' });
+  const [profileForm, setProfileForm] = useState({ name: '', email: '' });
+  const [screen, setScreen] = useState('select');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const update = (key) => (event) => setForm((previous) => ({ ...previous, [key]: event.target.value }));
+  const updateProfile = (key) => (event) => setProfileForm((previous) => ({ ...previous, [key]: event.target.value }));
+
+  useEffect(() => {
+    api('/api/profiles').then(setProfiles).catch((err) => setError(err.message));
+  }, []);
+
+  const availableProfiles = profiles.filter((profile) => !profile.isTeamMember);
+
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError('');
-    try { await api('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }); await onSaved(); }
+    try {
+      await api('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, email: selectedEmail }) });
+      await onSaved();
+    }
     catch (err) { setError(err.message); } finally { setBusy(false); }
   }
-  return <Modal title="Add a teammate" eyebrow="TEAM ACCESS" onClose={onClose}><form className="modal-form" onSubmit={submit}><label>Full name<input value={form.name} onChange={update('name')} placeholder="e.g. Jamie Chen" required /></label><label>Email address<input type="email" value={form.email} onChange={update('email')} placeholder="name@company.com" required /></label><label>Role<select value={form.role} onChange={update('role')}><option value="Cleaner">Cleaner</option><option value="Admin">Admin / Manager</option></select></label><label>Temporary password<input type="text" value={form.password} onChange={update('password')} minLength="8" required /></label>{error && <p className="form-error">{error}</p>}<div className="modal-actions"><button className="outline-button" type="button" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? 'Adding…' : 'Add teammate'}<ArrowRight size={15} /></button></div></form></Modal>;
+
+  async function createProfile(event) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      const profile = await api('/api/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileForm),
+      });
+      setProfiles((previous) => [...previous, profile].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedEmail(profile.email);
+      setProfileForm({ name: '', email: '' });
+      setScreen('select');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <Modal title={screen === 'select' ? 'Add a teammate' : 'Create a profile'} eyebrow={screen === 'select' ? 'TEAM ACCESS' : 'PROFILE DIRECTORY'} onClose={onClose}>
+    {screen === 'select' ? <form className="modal-form" onSubmit={submit}>
+      <label>Choose a profile<select value={selectedEmail} onChange={(event) => setSelectedEmail(event.target.value)} required>
+        <option value="">Select a profile</option>
+        {availableProfiles.map((profile) => <option key={profile.email} value={profile.email}>{profile.name} · {profile.email}</option>)}
+      </select></label>
+      {!availableProfiles.length && <p className="quiet-copy">There are no profiles waiting to be added. Create a profile first.</p>}
+      <button className="outline-button" type="button" onClick={() => { setError(''); setScreen('create'); }}>Create a profile</button>
+      <label>Role<select value={form.role} onChange={update('role')}><option value="Cleaner">Cleaner</option><option value="Admin">Admin / Manager</option></select></label>
+      <label>Temporary password<input type="password" autoComplete="new-password" value={form.password} onChange={update('password')} minLength="8" required /></label>
+      {error && <p className="form-error">{error}</p>}
+      <div className="modal-actions"><button className="outline-button" type="button" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy || !selectedEmail}>{busy ? 'Adding…' : 'Add teammate'}<ArrowRight size={15} /></button></div>
+    </form> : <form className="modal-form" onSubmit={createProfile}>
+      <label>Full name<input value={profileForm.name} onChange={updateProfile('name')} placeholder="e.g. Jamie Chen" required /></label>
+      <label>Email address<input type="email" value={profileForm.email} onChange={updateProfile('email')} placeholder="name@company.com" required /></label>
+      {error && <p className="form-error">{error}</p>}
+      <div className="modal-actions"><button className="outline-button" type="button" onClick={() => { setError(''); setScreen('select'); }}>Back</button><button className="button button-dark" disabled={busy}>{busy ? 'Creating…' : 'Create profile'}<ArrowRight size={15} /></button></div>
+    </form>}
+  </Modal>;
 }
 
 function Modal({ title, eyebrow, onClose, children }) {
