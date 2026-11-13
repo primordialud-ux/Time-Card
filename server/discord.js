@@ -1,6 +1,9 @@
-export async function sendDiscordNotification(title, message, recipient) {
+export async function sendDiscordAlert(title, description, recipientName = 'Team') {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-  if (!webhookUrl) return { status: 'not_configured' };
+  if (!webhookUrl) {
+    console.warn('DISCORD_WEBHOOK_URL is not set. Skipping notification.');
+    return;
+  }
 
   try {
     const response = await fetch(webhookUrl, {
@@ -9,18 +12,19 @@ export async function sendDiscordNotification(title, message, recipient) {
       body: JSON.stringify({
         embeds: [{
           title: `📋 ${title}`,
-          description: `**Recipient:** ${recipient}\n\n${message}`.slice(0, 4096),
-          color: 5814783,
+          description: `**Recipient / Target:** ${recipientName}\n\n${description}`.slice(0, 4096),
+          color: 3447003,
           timestamp: new Date().toISOString(),
         }],
       }),
     });
-    if (!response.ok) throw new Error(`Discord webhook returned HTTP ${response.status}.`);
-    console.log('Discord alert dispatched.');
-    return { status: 'sent' };
+    if (!response.ok) {
+      console.error('Discord API returned an error status:', response.status);
+    } else {
+      console.log('Discord notification sent successfully.');
+    }
   } catch (error) {
     const detail = String(error?.message || error).replaceAll(webhookUrl, '[redacted]');
-    console.error('Discord webhook error:', detail);
-    return { status: 'failed' };
+    console.error('Failed to dispatch Discord webhook:', detail);
   }
 }

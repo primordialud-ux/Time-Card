@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { sendJobAssignmentEmail, sendNewMessageEmail, sendPasswordResetEmail } from './email.js';
-import { sendDiscordNotification } from './discord.js';
+import { sendDiscordAlert } from './discord.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const sessionSecret = process.env.SESSION_SECRET;
@@ -161,19 +161,16 @@ const timeShape = (entry) => {
 const photoShape = (photo) => ({ ...photo, jobId: photo.job_id, cleanerEmail: photo.cleaner_email });
 const messageShape = (message) => ({ ...message, messageId: message.id, senderEmail: message.sender_email, receiverEmail: message.receiver_email, jobId: message.job_id, timestamp: message.timestamp });
 const notifyJobAssignment = async (job, cleaner) => {
-  const message = [
-    `Job: ${job.id}`,
-    `Date: ${job.date}`,
-    `Time: ${job.start_time}–${job.end_time}`,
-    `Address: ${job.address}`,
-    `Instructions: ${job.instructions || 'None'}`,
-  ].join('\n');
   const [emailNotification, discordNotification] = await Promise.all([
     sendJobAssignmentEmail(job, cleaner).catch((error) => {
       console.error('Failed to send job assignment email:', error);
       return { status: 'failed' };
     }),
-    sendDiscordNotification('New job assignment', message, cleaner.name),
+    sendDiscordAlert(
+      'New Job Assigned',
+      'A new cleaning job has been dispatched. Check your dashboard for details.',
+      cleaner.name,
+    ),
   ]);
   return { emailNotification, discordNotification };
 };
@@ -511,7 +508,7 @@ app.post('/api/messages', requireAuth, async (req, res) => {
       console.error('Failed to send new-message email:', error);
       return { status: 'failed' };
     }),
-    sendDiscordNotification('New TimeCard message', `From: ${sender.name}\n\n${message.content}`, receiver.name),
+    sendDiscordAlert('New Chat Message', message.content, receiver.name),
   ]);
   res.status(201).json({ ...shaped, emailNotification, discordNotification });
 });
