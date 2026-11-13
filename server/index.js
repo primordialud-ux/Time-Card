@@ -11,6 +11,13 @@ import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { sendJobAssignmentEmail, sendNewMessageEmail, sendPasswordResetEmail } from './email.js';
 
+const isProduction = process.env.NODE_ENV === 'production';
+const sessionSecret = process.env.SESSION_SECRET;
+const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+if (isProduction && (!sessionSecret || sessionSecret.length < 32)) {
+  throw new Error('Production requires SESSION_SECRET to contain at least 32 characters.');
+}
+
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(root, 'data');
 const uploadDir = path.join(root, 'uploads');
@@ -57,7 +64,7 @@ db.exec(`
 `);
 
 const userCount = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
-if (!userCount) {
+if (!userCount && !isProduction) {
   const insertUser = db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)');
   const password = bcrypt.hashSync('welcome123', 10);
   insertUser.run('primordialud@gmail.com', 'Morgan Lee', 'Admin', password);
@@ -75,6 +82,25 @@ if (!userCount) {
   insertJob.run('J003', date(1), '09:00', '12:00', '501 NE Alberta St, Portland', 'Pet-friendly products only. A golden retriever will be home.', 'Pending', 'alex@timecard.local');
   insertJob.run('J004', date(-1), '10:00', '13:00', '2207 SE Belmont St, Portland', 'Monthly deep clean; supplies are under the utility sink.', 'Completed', 'alex@timecard.local');
 }
+if (!userCount && isProduction) {
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminEmail || !adminPassword || adminPassword.length < 12) {
+    throw new Error('An empty production database requires ADMIN_EMAIL and an ADMIN_PASSWORD of at least 12 characters.');
+  }
+  db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)')
+    .run(adminEmail, process.env.ADMIN_NAME?.trim() || 'Administrator', 'Admin', bcrypt.hashSync(adminPassword, 10));
+}
+if (isProduction) {
+  const demoEmails = ['primordialud@gmail.com', 'your@email.com', 'cleaner@email.com', 'alex@timecard.local'];
+  const seededUsers = db.prepare(`SELECT email, password_hash FROM users WHERE email IN (${demoEmails.map(() => '?').join(', ')})`).all(...demoEmails);
+  const invalidateDefaultPassword = db.prepare('UPDATE users SET password_hash = ? WHERE email = ?');
+  for (const user of seededUsers) {
+    if (bcrypt.compareSync('welcome123', user.password_hash)) {
+      invalidateDefaultPassword.run(bcrypt.hashSync(randomBytes(32).toString('hex'), 10), user.email);
+      console.warn(`Disabled a demo password for ${user.email}; set a unique password before use.`);
+    }
+  }
+}
 if (!db.prepare("SELECT id FROM time_entries WHERE job_id = 'J001' AND clock_out IS NULL").get()) {
   const firstJob = db.prepare("SELECT date, start_time, cleaner_email FROM jobs WHERE id = 'J001' AND status = 'In Progress'").get();
   if (firstJob) {
@@ -87,7 +113,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: true, credentials: true } });
 const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET || 'timecard-local-development-secret',
+  secret: sessionSecret || randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 },
@@ -97,7 +123,6 @@ app.use(sessionMiddleware);
 app.use('/uploads', express.static(uploadDir));
 io.engine.use(sessionMiddleware);
 
-const ADMIN_EMAIL = 'primordialud@gmail.com';
 const publicUser = (user) => ({ email: user.email, name: user.name, role: user.role });
 const requireAuth = (req, res, next) => req.session.user ? next() : res.status(401).json({ error: 'Sign in to continue.' });
 const requireAdmin = (req, res, next) => req.session.user?.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin access required.' });
@@ -170,7 +195,7 @@ app.post('/api/signup', (req, res) => {
     return res.status(409).json({ error: 'An account with that email already exists.' });
   }
 
-  const role = trimmedEmail === ADMIN_EMAIL ? 'Admin' : 'Cleaner';
+  const role = 'Cleaner';
   const passwordHash = bcrypt.hashSync(trimmedPassword, 10);
   db.prepare('INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)')
     .run(trimmedEmail, trimmedName, role, passwordHash);
@@ -351,7 +376,9 @@ app.get('/api/contacts', requireAuth, (req, res) => {
 app.get('/api/messages', requireAuth, (req, res) => {
   const peer = String(req.query.peer || '');
   if (!db.prepare('SELECT email FROM users WHERE email = ?').get(peer) || peer === req.session.user.email) return res.status(400).json({ error: 'Choose a valid conversation.' });
-  const rows = db.prepare(`SELECT * FROM messages WHERE ((sender_email = ? AND receiver_email = ?) OR (sender_email = ? AND receiver_email = ?)) AND (job_id IS ? OR ? IS NULL) ORDER BY timestamp`).all(req.session.user.email, peer, peer, req.session.user.email, req.query.jobId || null, req.query.jobId || null);
+  const rows = req.query.jobId === undefined
+    ? db.prepare('SELECT * FROM messages WHERE (sender_email = ? AND receiver_email = ?) OR (sender_email = ? AND receiver_email = ?) ORDER BY timestamp').all(req.session.user.email, peer, peer, req.session.user.email)
+    : db.prepare('SELECT * FROM messages WHERE ((sender_email = ? AND receiver_email = ?) OR (sender_email = ? AND receiver_email = ?)) AND job_id IS ? ORDER BY timestamp').all(req.session.user.email, peer, peer, req.session.user.email, req.query.jobId);
   res.json(rows.map(messageShape));
 });
 app.post('/api/messages', requireAuth, async (req, res) => {

@@ -15,7 +15,9 @@ npm run dev
 
 Open the Vite URL printed by the dev server (usually `http://localhost:5173`). The API listens on port `3000`.
 
-The root `.env` configures the API port, SQLite database path, and optional email delivery. Copy `.env.example` to `.env` to create local settings; the Vite proxy reads the same `PORT` value. To enable assignment, chat, and password reset emails, set `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`; `SMTP_PORT` defaults to `587`, while `SMTP_FROM` and `APP_URL` are optional. Without SMTP settings, saved jobs and messages still work and the API logs that email delivery is not configured.
+The root `.env` configures the API port, SQLite database path, and email delivery. Copy `.env.example` to `.env` locally, or set these values as environment variables in production; deployment does not automatically load the repository's `.env`. To enable assignment, chat, and password reset emails, configure `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`. `SMTP_PORT` defaults to `587` (STARTTLS); port `465` automatically uses implicit TLS. Set `SMTP_SECURE=true` or `false` to override that default. Configure a provider-approved `SMTP_FROM` and the public HTTPS `APP_URL` for correct sender and password-reset links. Without SMTP settings, email notifications are skipped and the API logs that email delivery is not configured.
+
+Run `npm run test:smtp` to verify the SMTP connection and credentials configured in `.env`. This check does not send an email.
 
 Demo accounts use the password `welcome123`:
 
@@ -25,7 +27,7 @@ Demo accounts use the password `welcome123`:
 | Cleaner | `cleaner@email.com` |
 | Cleaner | `alex@timecard.local` |
 
-For a production-style local run, build the frontend with `npm run build`, then start the API and static app with `npm start`. Set `SESSION_SECRET` to a unique secret outside local development.
+For a production-style local run, build the frontend with `npm run build`, then start the API and static app with `npm start`. In production, set `SESSION_SECRET` to a unique random value of at least 32 characters (for example, generate one with `openssl rand -hex 32`). On the first start with an empty database, set `ADMIN_EMAIL` and a unique `ADMIN_PASSWORD` of at least 12 characters to create the administrator account. Public signup creates cleaners only. Demo accounts and data are created only outside production; if an older production database contains a demo account still using `welcome123`, startup invalidates that password so it cannot be used.
 
 ## Workflows
 

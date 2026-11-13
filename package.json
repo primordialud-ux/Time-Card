@@ -7,6 +7,7 @@
     "dev": "concurrently -k \"npm:server:dev\" \"npm:client:dev\"",
     "server:dev": "node --env-file-if-exists=.env --watch server/index.js",
     "client:dev": "vite --host 0.0.0.0",
+    "test:smtp": "node --env-file-if-exists=.env scripts/test-smtp.js",
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.js"
   },

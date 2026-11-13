@@ -2,28 +2,38 @@ import nodemailer from 'nodemailer';
 
 let transporter;
 
-function getTransporter() {
+function getTransporter({ required = false } = {}) {
   const missing = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']
     .filter((name) => !process.env[name]);
   if (missing.length) {
+    if (required) throw new Error(`Missing required SMTP settings: ${missing.join(', ')}.`);
     console.warn(`Email notification skipped; configure ${missing.join(', ')} in .env.`);
     return null;
   }
 
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const port = Number(process.env.SMTP_PORT || '587');
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('SMTP_PORT must be a valid port number.');
+  }
+  const secureSetting = process.env.SMTP_SECURE?.toLowerCase();
+  if (secureSetting && !['true', 'false'].includes(secureSetting)) {
+    throw new Error('SMTP_SECURE must be true or false.');
   }
 
   if (!transporter) {
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port,
-      secure: false,
+      secure: secureSetting ? secureSetting === 'true' : port === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
   }
   return transporter;
+}
+
+export async function verifySmtpConnection() {
+  const mailer = getTransporter({ required: true });
+  await mailer.verify();
 }
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
