@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import {
   ArrowDownLeft, ArrowRight, CalendarDays, Camera, Check, CheckCheck, ChevronDown,
   Clock3, FileClock, House, LogOut, MapPin, Menu, MessageCircle, Paperclip,
-  Pencil, Plus, Send, ShieldCheck, Sparkles, Trash2, Users, X,
+  Pause, Pencil, Play, Plus, Send, ShieldCheck, Sparkles, Trash2, Users, X,
 } from 'lucide-react';
 import './styles.css';
 
@@ -192,6 +192,16 @@ function App() {
     }
   }
 
+  async function toggleBreak(job, isPaused) {
+    try {
+      await api(`/api/jobs/${job.id}/${isPaused ? 'resume' : 'pause'}`, { method: 'POST' });
+      await refresh();
+      setNotice(isPaused ? 'Break ended. Your work time is tracking again.' : 'Break started. Break time is being tracked.');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function deleteJob(job) {
     if (!window.confirm(`Delete ${job.id}? Jobs with linked time entries, photos, or messages cannot be deleted.`)) return;
     try {
@@ -233,7 +243,7 @@ function App() {
   if (displayPage === 'Overview' || displayPage === 'My day') {
     content = isAdmin
       ? <Overview user={user} jobs={jobs} timeEntries={timeEntries} photos={photos} contacts={contacts} todayJobs={todaysJobs} onNavigate={setPage} onNewJob={() => setModal({ type: 'job' })} onMessage={() => setPage('Messages')} />
-      : <CleanerDay user={user} jobs={jobs} timeEntries={timeEntries} activeEntry={activeEntry} onClock={clock} onUpload={(job) => setModal({ type: 'photo', job })} />;
+      : <CleanerDay user={user} jobs={jobs} timeEntries={timeEntries} activeEntry={activeEntry} onClock={clock} onToggleBreak={toggleBreak} onUpload={(job) => setModal({ type: 'photo', job })} />;
   } else if (displayPage === 'Schedule') {
     content = <Schedule jobs={jobs} onNewJob={() => setModal({ type: 'job' })} onEdit={(job) => setModal({ type: 'job', job })} onDelete={deleteJob} onMessage={(job) => { setChatPeer(job.cleanerEmail); setChatJob(job.id); setPage('Messages'); }} />;
   } else if (displayPage === 'Time cards') {
@@ -328,24 +338,41 @@ function formatClock(value) {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-function CleanerDay({ user, jobs, timeEntries, activeEntry, onClock, onUpload }) {
+function CleanerDay({ user, jobs, timeEntries, activeEntry, onClock, onToggleBreak, onUpload }) {
   const date = new Date().toISOString().slice(0, 10);
   const todayJobs = jobs.filter((job) => job.date === date);
   const completed = jobs.filter((job) => job.status === 'Completed').length;
   const hours = timeEntries.reduce((sum, entry) => sum + (entry.hours || 0), 0);
   return <>
-    <PageHeading eyebrow={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()} title={`Your day, ${user.name.split(' ')[0]}.`} detail="One good clean at a time." action={<span className={`status-pill ${activeEntry ? 'status-progress' : 'status-pending'}`}><i />{activeEntry ? 'Clocked in' : 'Off the clock'}</span>} />
-    <section className={`shift-banner ${activeEntry ? 'shift-active' : ''}`}><div className="shift-banner-copy"><span className="eyebrow">{activeEntry ? 'SHIFT IN PROGRESS' : 'YOUR SHIFT, AT A GLANCE'}</span><h2>{activeEntry ? 'You’re on the clock.' : todayJobs.length ? 'Ready when you are.' : 'A clear day ahead.'}</h2><p>{activeEntry ? 'Your time is being tracked. Keep up the great work.' : `${todayJobs.length} ${todayJobs.length === 1 ? 'job' : 'jobs'} on your schedule today.`}</p></div><div className="shift-clock"><span className="clock-face"><Clock3 size={22} /></span><span><b>{hours.toFixed(1)}<small>h</small></b><small>logged this week</small></span></div><span className="shift-curve" /></section>
+    <PageHeading eyebrow={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()} title={`Your day, ${user.name.split(' ')[0]}.`} detail="One good clean at a time." action={<span className={`status-pill ${activeEntry ? activeEntry.breakStartedAt ? 'status-pending' : 'status-progress' : 'status-pending'}`}><i />{activeEntry ? activeEntry.breakStartedAt ? 'On break' : 'Clocked in' : 'Off the clock'}</span>} />
+    <section className={`shift-banner ${activeEntry ? 'shift-active' : ''}`}><div className="shift-banner-copy"><span className="eyebrow">{activeEntry ? activeEntry.breakStartedAt ? 'BREAK IN PROGRESS' : 'SHIFT IN PROGRESS' : 'YOUR SHIFT, AT A GLANCE'}</span><h2>{activeEntry ? activeEntry.breakStartedAt ? 'You’re on a break.' : 'You’re on the clock.' : todayJobs.length ? 'Ready when you are.' : 'A clear day ahead.'}</h2><p>{activeEntry ? activeEntry.breakStartedAt ? <>Break time: <LiveDuration startedAt={activeEntry.breakStartedAt} /></> : 'Your work time is being tracked. Take a break whenever you need one.' : `${todayJobs.length} ${todayJobs.length === 1 ? 'job' : 'jobs'} on your schedule today.`}</p></div><div className="shift-clock"><span className="clock-face"><Clock3 size={22} /></span><span><b>{hours.toFixed(1)}<small>h</small></b><small>logged this week</small></span></div><span className="shift-curve" /></section>
     <div className="cleaner-stats"><div><span className="stat-number">{todayJobs.length.toString().padStart(2, '0')}</span><span>Scheduled today</span></div><div><span className="stat-number">{completed.toString().padStart(2, '0')}</span><span>Jobs completed</span></div><div><span className="stat-number">{timeEntries.length.toString().padStart(2, '0')}</span><span>Time entries</span></div></div>
     <div className="section-head jobs-heading"><div><span className="eyebrow">ON YOUR ROUTE</span><h2>Today’s jobs <span className="count-dot">{todayJobs.length}</span></h2></div><span className="subtle-date"><CalendarDays size={14} />{formatDate(date, { month: 'long', day: 'numeric' })}</span></div>
-    {todayJobs.length ? <div className="cleaner-job-list">{todayJobs.map((job) => <CleanerJob key={job.id} job={job} activeEntry={activeEntry} onClock={onClock} onUpload={onUpload} />)}</div> : <div className="surface no-jobs"><span className="no-jobs-icon"><Sparkles size={22} /></span><h3>No jobs scheduled for today</h3><p>Your next assignment will appear here.</p></div>}
+    {todayJobs.length ? <div className="cleaner-job-list">{todayJobs.map((job) => <CleanerJob key={job.id} job={job} activeEntry={activeEntry} onClock={onClock} onToggleBreak={onToggleBreak} onUpload={onUpload} />)}</div> : <div className="surface no-jobs"><span className="no-jobs-icon"><Sparkles size={22} /></span><h3>No jobs scheduled for today</h3><p>Your next assignment will appear here.</p></div>}
   </>;
 }
 
-function CleanerJob({ job, activeEntry, onClock, onUpload }) {
+function CleanerJob({ job, activeEntry, onClock, onToggleBreak, onUpload }) {
   const isActive = activeEntry?.jobId === job.id;
+  const isPaused = isActive && Boolean(activeEntry.breakStartedAt);
   const canClock = !activeEntry || isActive;
-  return <article className={`cleaner-job ${isActive ? 'cleaner-job-active' : ''}`}><div className="cleaner-job-time"><span>{formatClock(job.startTime)}</span><i /><span>{formatClock(job.endTime)}</span></div><div className="cleaner-job-main"><div className="cleaner-job-heading"><div><span className="eyebrow">{job.id} · {formatDate(job.date)}</span><h3>{job.address.split(',')[0]}</h3><span className="job-address"><MapPin size={14} />{job.address}</span></div><span className={`status-pill status-${job.status.toLowerCase().replace(' ', '-')}`}><i />{job.status}</span></div><p className="job-instructions">{job.instructions || 'No special instructions.'}</p><div className="cleaner-job-actions"><button className={`button ${isActive ? 'button-coral' : 'button-dark'}`} disabled={!canClock || job.status === 'Completed'} onClick={() => onClock(job, isActive)}>{isActive ? <><ArrowDownLeft size={15} />Clock out</> : <><Clock3 size={15} />Clock in</>}</button><button className="outline-button" onClick={() => onUpload(job)}><Camera size={15} />Add job photo</button></div></div><div className="cleaner-job-side"><span className="side-number">{job.id.slice(-3)}</span><span>ASSIGNMENT</span></div></article>;
+  return <article className={`cleaner-job ${isActive ? 'cleaner-job-active' : ''}`}><div className="cleaner-job-time"><span>{formatClock(job.startTime)}</span><i /><span>{formatClock(job.endTime)}</span></div><div className="cleaner-job-main"><div className="cleaner-job-heading"><div><span className="eyebrow">{job.id} · {formatDate(job.date)}</span><h3>{job.address.split(',')[0]}</h3><span className="job-address"><MapPin size={14} />{job.address}</span></div><span className={`status-pill status-${job.status.toLowerCase().replace(' ', '-')}`}><i />{job.status}</span></div><p className="job-instructions">{job.instructions || 'No special instructions.'}</p>{isActive && <p className="job-instructions">{isPaused ? <>Break in progress · <LiveDuration startedAt={activeEntry.breakStartedAt} /> so far</> : `Break time tracked: ${formatDuration(activeEntry.breakSeconds || 0)} · ${activeEntry.breakCount || 0} ${activeEntry.breakCount === 1 ? 'break' : 'breaks'}`}</p>}<div className="cleaner-job-actions"><button className={`button ${isActive ? 'button-coral' : 'button-dark'}`} disabled={!canClock || job.status === 'Completed'} onClick={() => onClock(job, isActive)}>{isActive ? <><ArrowDownLeft size={15} />Clock out</> : <><Clock3 size={15} />Clock in</>}</button>{isActive && <button className="outline-button" onClick={() => onToggleBreak(job, isPaused)}>{isPaused ? <><Play size={15} />Resume job</> : <><Pause size={15} />Take a break</>}</button>}<button className="outline-button" onClick={() => onUpload(job)}><Camera size={15} />Add job photo</button></div></div><div className="cleaner-job-side"><span className="side-number">{job.id.slice(-3)}</span><span>ASSIGNMENT</span></div></article>;
+}
+
+function formatDuration(seconds = 0) {
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours ? `${hours}h ${remainingMinutes}m` : `${minutes}m`;
+}
+
+function LiveDuration({ startedAt }) {
+  const [, update] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => update(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return formatDuration(Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000)));
 }
 
 function Schedule({ jobs, onNewJob, onEdit, onDelete, onMessage }) {
@@ -359,7 +386,7 @@ function TimeCards({ entries, isAdmin, hoursTotal }) {
   return <><PageHeading eyebrow="PAYROLL & HOURS" title={isAdmin ? 'Time cards' : 'Your time cards'} detail={isAdmin ? 'A clear record of every shift across the team.' : 'Your hours, all in one place.'} />
     <section className="time-summary"><div><span className="eyebrow">TOTAL HOURS</span><strong>{hoursTotal.toFixed(2)}<small> hrs</small></strong><span className="summary-note"><span className="live-dot" />{entries.length} recorded {entries.length === 1 ? 'shift' : 'shifts'}</span></div><span className="summary-art"><FileClock size={50} strokeWidth={1.15} /></span></section>
     <div className="section-head time-list-head"><div><span className="eyebrow">SHIFT HISTORY</span><h2>Recent entries</h2></div></div>
-    <div className="surface table-surface"><table><thead><tr><th>{isAdmin ? 'TEAM MEMBER' : 'JOB'}</th><th>LOCATION</th><th>CLOCK IN</th><th>CLOCK OUT</th><th>HOURS</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id}><td>{isAdmin ? <span className="table-person"><span className="tiny-avatar">{initials(entry.cleaner_name)}</span>{entry.cleaner_name}</span> : <span className="table-job-id">{entry.jobId}</span>}</td><td><b>{entry.address}</b></td><td><b>{formatTime(entry.clockIn)}</b><small>{formatDate(entry.clockIn?.slice(0, 10))}</small></td><td>{entry.clockOut ? <><b>{formatTime(entry.clockOut)}</b><small>{formatDate(entry.clockOut.slice(0, 10))}</small></> : <span className="status-pill status-progress"><i />In progress</span>}</td><td><strong className="hours-value">{entry.hours == null ? '—' : `${entry.hours.toFixed(2)} h`}</strong></td></tr>)}</tbody></table>{!entries.length && <EmptyState icon={Clock3} title="No hours logged yet" detail="Completed shifts will appear here." />}</div>
+    <div className="surface table-surface"><table><thead><tr><th>{isAdmin ? 'TEAM MEMBER' : 'JOB'}</th><th>LOCATION</th><th>CLOCK IN</th><th>CLOCK OUT</th><th>BREAKS</th><th>HOURS</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id}><td>{isAdmin ? <span className="table-person"><span className="tiny-avatar">{initials(entry.cleaner_name)}</span>{entry.cleaner_name}</span> : <span className="table-job-id">{entry.jobId}</span>}</td><td><b>{entry.address}</b></td><td><b>{formatTime(entry.clockIn)}</b><small>{formatDate(entry.clockIn?.slice(0, 10))}</small></td><td>{entry.clockOut ? <><b>{formatTime(entry.clockOut)}</b><small>{formatDate(entry.clockOut.slice(0, 10))}</small></> : <span className={`status-pill ${entry.breakStartedAt ? 'status-pending' : 'status-progress'}`}><i />{entry.breakStartedAt ? 'On break' : 'In progress'}</span>}</td><td><strong className="hours-value">{formatDuration(entry.breakSeconds || 0)}</strong><small>{entry.breakCount || 0} {entry.breakCount === 1 ? 'break' : 'breaks'}</small></td><td><strong className="hours-value">{entry.hours == null ? '—' : `${entry.hours.toFixed(2)} h`}</strong></td></tr>)}</tbody></table>{!entries.length && <EmptyState icon={Clock3} title="No hours logged yet" detail="Completed shifts will appear here." />}</div>
   </>;
 }
 

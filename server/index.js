@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { sendJobAssignmentEmail, sendNewMessageEmail, sendPasswordResetEmail } from './email.js';
+import { sendDiscordNotification } from './discord.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const sessionSecret = process.env.SESSION_SECRET;
@@ -53,6 +54,12 @@ db.exec(`
     id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), cleaner_email TEXT NOT NULL REFERENCES users(email),
     clock_in TEXT NOT NULL, clock_out TEXT, hours REAL
   );
+  CREATE TABLE IF NOT EXISTS time_entry_breaks (
+    id TEXT PRIMARY KEY, time_entry_id TEXT NOT NULL REFERENCES time_entries(id),
+    started_at TEXT NOT NULL, ended_at TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS one_active_break_per_time_entry
+    ON time_entry_breaks(time_entry_id) WHERE ended_at IS NULL;
   CREATE TABLE IF NOT EXISTS photos (
     id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), cleaner_email TEXT NOT NULL REFERENCES users(email),
     type TEXT NOT NULL CHECK(type IN ('Before', 'After')), photo TEXT NOT NULL,
@@ -132,9 +139,44 @@ const requireAuth = (req, res, next) => req.session.user ? next() : res.status(4
 const requireAdmin = (req, res, next) => req.session.user?.role === 'Admin' ? next() : res.status(403).json({ error: 'Admin access required.' });
 const jobForUser = (jobId, user) => db.prepare('SELECT * FROM jobs WHERE id = ? AND (? = \'Admin\' OR cleaner_email = ?)').get(jobId, user.role, user.email);
 const jobShape = (job) => ({ ...job, cleanerEmail: job.cleaner_email, startTime: job.start_time, endTime: job.end_time });
-const timeShape = (entry) => ({ ...entry, jobId: entry.job_id, cleanerEmail: entry.cleaner_email, clockIn: entry.clock_in, clockOut: entry.clock_out });
+const timeShape = (entry) => {
+  const breaks = db.prepare('SELECT started_at, ended_at FROM time_entry_breaks WHERE time_entry_id = ?').all(entry.id);
+  const now = Date.now();
+  const breakSeconds = Math.round(breaks.reduce((sum, item) => {
+    const end = item.ended_at ? Date.parse(item.ended_at) : now;
+    return sum + Math.max(0, (end - Date.parse(item.started_at)) / 1000);
+  }, 0));
+  const activeBreak = breaks.find((item) => !item.ended_at);
+  return {
+    ...entry,
+    jobId: entry.job_id,
+    cleanerEmail: entry.cleaner_email,
+    clockIn: entry.clock_in,
+    clockOut: entry.clock_out,
+    breakSeconds,
+    breakStartedAt: activeBreak?.started_at || null,
+    breakCount: breaks.length,
+  };
+};
 const photoShape = (photo) => ({ ...photo, jobId: photo.job_id, cleanerEmail: photo.cleaner_email });
 const messageShape = (message) => ({ ...message, messageId: message.id, senderEmail: message.sender_email, receiverEmail: message.receiver_email, jobId: message.job_id, timestamp: message.timestamp });
+const notifyJobAssignment = async (job, cleaner) => {
+  const message = [
+    `Job: ${job.id}`,
+    `Date: ${job.date}`,
+    `Time: ${job.start_time}–${job.end_time}`,
+    `Address: ${job.address}`,
+    `Instructions: ${job.instructions || 'None'}`,
+  ].join('\n');
+  const [emailNotification, discordNotification] = await Promise.all([
+    sendJobAssignmentEmail(job, cleaner).catch((error) => {
+      console.error('Failed to send job assignment email:', error);
+      return { status: 'failed' };
+    }),
+    sendDiscordNotification('New job assignment', message, cleaner.name),
+  ]);
+  return { emailNotification, discordNotification };
+};
 
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body || {};
@@ -305,11 +347,8 @@ app.post('/api/jobs', requireAuth, requireAdmin, async (req, res) => {
   const id = `J${randomUUID().slice(0, 6).toUpperCase()}`;
   db.prepare('INSERT INTO jobs (id, date, start_time, end_time, address, instructions, cleaner_email) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, date, startTime, endTime, address, instructions, cleanerEmail);
   const job = db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE id = ?').get(id);
-  const emailNotification = await sendJobAssignmentEmail(job, cleaner).catch((error) => {
-    console.error('Failed to send job assignment email:', error);
-    return { status: 'failed' };
-  });
-  res.status(201).json({ ...jobShape(job), emailNotification });
+  const notifications = await notifyJobAssignment(job, cleaner);
+  res.status(201).json({ ...jobShape(job), ...notifications });
 });
 app.put('/api/jobs/:id', requireAuth, requireAdmin, async (req, res) => {
   const { date, startTime, endTime, address, instructions = '', cleanerEmail } = req.body || {};
@@ -320,13 +359,10 @@ app.put('/api/jobs/:id', requireAuth, requireAdmin, async (req, res) => {
   const result = db.prepare('UPDATE jobs SET date = ?, start_time = ?, end_time = ?, address = ?, instructions = ?, cleaner_email = ? WHERE id = ?').run(date, startTime, endTime, address, instructions, cleanerEmail, req.params.id);
   if (!result.changes) return res.status(404).json({ error: 'Job not found.' });
   const job = db.prepare('SELECT jobs.*, users.name AS cleaner_name FROM jobs JOIN users ON users.email = jobs.cleaner_email WHERE id = ?').get(req.params.id);
-  const emailNotification = previousJob.cleaner_email !== cleanerEmail
-    ? await sendJobAssignmentEmail(job, cleaner).catch((error) => {
-      console.error('Failed to send job assignment email:', error);
-      return { status: 'failed' };
-    })
+  const notifications = previousJob.cleaner_email !== cleanerEmail
+    ? await notifyJobAssignment(job, cleaner)
     : null;
-  res.json({ ...jobShape(job), ...(emailNotification && { emailNotification }) });
+  res.json({ ...jobShape(job), ...(notifications || {}) });
 });
 app.delete('/api/jobs/:id', requireAuth, requireAdmin, (req, res) => {
   const job = db.prepare('SELECT id FROM jobs WHERE id = ?').get(req.params.id);
@@ -380,10 +416,39 @@ app.post('/api/jobs/:id/clock-out', requireAuth, (req, res) => {
   const entry = db.prepare('SELECT * FROM time_entries WHERE job_id = ? AND cleaner_email = ? AND clock_out IS NULL').get(req.params.id, req.session.user.email);
   if (!entry) return res.status(404).json({ error: 'No active time entry found for this job.' });
   const clockOut = new Date();
-  const hours = Math.round(((clockOut.getTime() - new Date(entry.clock_in).getTime()) / 3600000) * 100) / 100;
-  db.prepare('UPDATE time_entries SET clock_out = ?, hours = ? WHERE id = ?').run(clockOut.toISOString(), hours, entry.id);
+  const clockOutIso = clockOut.toISOString();
+  const finishShift = db.transaction(() => {
+    db.prepare('UPDATE time_entry_breaks SET ended_at = ? WHERE time_entry_id = ? AND ended_at IS NULL').run(clockOutIso, entry.id);
+    const breakMilliseconds = db.prepare(`
+      SELECT COALESCE(SUM((julianday(ended_at) - julianday(started_at)) * 86400000), 0) AS total
+      FROM time_entry_breaks WHERE time_entry_id = ?
+    `).get(entry.id).total;
+    const workedMilliseconds = Math.max(0, clockOut.getTime() - Date.parse(entry.clock_in) - breakMilliseconds);
+    const hours = Math.round((workedMilliseconds / 3600000) * 100) / 100;
+    db.prepare('UPDATE time_entries SET clock_out = ?, hours = ? WHERE id = ?').run(clockOutIso, hours, entry.id);
+  });
+  finishShift();
   const openEntries = db.prepare('SELECT id FROM time_entries WHERE job_id = ? AND clock_out IS NULL').get(entry.job_id);
   if (!openEntries) db.prepare("UPDATE jobs SET status = 'Completed' WHERE id = ?").run(entry.job_id);
+  res.json(timeShape(db.prepare('SELECT * FROM time_entries WHERE id = ?').get(entry.id)));
+});
+app.post('/api/jobs/:id/pause', requireAuth, (req, res) => {
+  if (req.session.user.role !== 'Cleaner') return res.status(403).json({ error: 'Only cleaners can pause a job.' });
+  const entry = db.prepare('SELECT * FROM time_entries WHERE job_id = ? AND cleaner_email = ? AND clock_out IS NULL').get(req.params.id, req.session.user.email);
+  if (!entry) return res.status(404).json({ error: 'Clock in before taking a break.' });
+  if (db.prepare('SELECT id FROM time_entry_breaks WHERE time_entry_id = ? AND ended_at IS NULL').get(entry.id)) {
+    return res.status(409).json({ error: 'This job is already paused.' });
+  }
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO time_entry_breaks (id, time_entry_id, started_at) VALUES (?, ?, ?)').run(randomUUID(), entry.id, now);
+  res.json(timeShape(db.prepare('SELECT * FROM time_entries WHERE id = ?').get(entry.id)));
+});
+app.post('/api/jobs/:id/resume', requireAuth, (req, res) => {
+  if (req.session.user.role !== 'Cleaner') return res.status(403).json({ error: 'Only cleaners can resume a job.' });
+  const entry = db.prepare('SELECT * FROM time_entries WHERE job_id = ? AND cleaner_email = ? AND clock_out IS NULL').get(req.params.id, req.session.user.email);
+  if (!entry) return res.status(404).json({ error: 'No active job to resume.' });
+  const result = db.prepare('UPDATE time_entry_breaks SET ended_at = ? WHERE time_entry_id = ? AND ended_at IS NULL').run(new Date().toISOString(), entry.id);
+  if (!result.changes) return res.status(409).json({ error: 'This job is not paused.' });
   res.json(timeShape(db.prepare('SELECT * FROM time_entries WHERE id = ?').get(entry.id)));
 });
 
@@ -441,11 +506,14 @@ app.post('/api/messages', requireAuth, async (req, res) => {
   const shaped = messageShape(message);
   io.to(`user:${message.sender_email}`).to(`user:${message.receiver_email}`).emit('message:new', shaped);
   const sender = db.prepare('SELECT name FROM users WHERE email = ?').get(message.sender_email);
-  const emailNotification = await sendNewMessageEmail(receiver, sender, message.content).catch((error) => {
-    console.error('Failed to send new-message email:', error);
-    return { status: 'failed' };
-  });
-  res.status(201).json({ ...shaped, emailNotification });
+  const [emailNotification, discordNotification] = await Promise.all([
+    sendNewMessageEmail(receiver, sender, message.content).catch((error) => {
+      console.error('Failed to send new-message email:', error);
+      return { status: 'failed' };
+    }),
+    sendDiscordNotification('New TimeCard message', `From: ${sender.name}\n\n${message.content}`, receiver.name),
+  ]);
+  res.status(201).json({ ...shaped, emailNotification, discordNotification });
 });
 
 io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
